@@ -35,6 +35,7 @@ function StatusBadge({ balance }: { balance: number }) {
 }
 
 export default function Home() {
+  console.log("Using API Key:", process.env.NEXT_PUBLIC_WINSTON_API_KEY);
   const { isLoaded, userId } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
