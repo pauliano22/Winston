@@ -224,7 +224,29 @@ async def chat_completions(request: Request):
     except RedisError as exc:
         raise HTTPException(status_code=500, detail=f"State store unavailable: {exc}") from exc
 
-    # ── 3. Route via LiteLLM ───────────────────────────────────────────────────
+    # ── 3. Dynamic model routing ───────────────────────────────────────────────
+    _COMPLEX_TRIGGERS = {"code", "script", "function", "system"}
+
+    last_user_text = next(
+        (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
+        "",
+    )
+    word_count = len(last_user_text.split())
+    is_simple = (
+        word_count < 40
+        and not any(trigger in last_user_text.lower() for trigger in _COMPLEX_TRIGGERS)
+    )
+
+    if is_simple:
+        original_model = body.get("model", "unknown")
+        body["model"] = "claude-3-haiku-20240307"
+        print(
+            f"🚦 DYNAMIC ROUTING: Diverting simple request from "
+            f"{original_model} to claude-3-haiku-20240307 to save budget.",
+            flush=True,
+        )
+
+    # ── 4. Route via LiteLLM ───────────────────────────────────────────────────
     try:
         response = litellm.completion(**body)
     except Exception as exc:
