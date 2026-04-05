@@ -60,7 +60,7 @@ app = FastAPI(title="Winston Proxy", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "http://3.144.134.48:3000", "http://3.144.134.48"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
