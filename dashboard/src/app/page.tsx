@@ -1,5 +1,6 @@
 "use client";
 
+import { useAuth } from "@clerk/nextjs";
 import { useEffect, useState, useCallback } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://3.144.134.48:8000";
@@ -33,6 +34,7 @@ function StatusBadge({ balance }: { balance: number }) {
 }
 
 export default function Home() {
+  const { isLoaded, userId } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -103,8 +105,18 @@ export default function Home() {
     }
   }
 
+  if (!isLoaded) return null;
+
+  if (!userId) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-zinc-950 text-zinc-400 text-sm">
+        Please sign in to manage your AI project budgets.
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans">
+      <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans">
       {/* Header */}
       <header className="border-b border-zinc-800 bg-zinc-900">
         <div className="mx-auto max-w-5xl px-6 py-4 flex items-center justify-between">

@@ -4,9 +4,10 @@ from contextlib import asynccontextmanager
 
 import litellm
 import redis.asyncio as aioredis
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from redis.exceptions import RedisError, ResponseError
 
@@ -17,6 +18,7 @@ litellm.drop_params = True
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+WINSTON_MASTER_KEY = os.environ.get("WINSTON_MASTER_KEY", "")
 LOOP_TRIP_THRESHOLD = 3
 LOOP_TTL = 3600  # seconds — loop counters expire after 1 hour of inactivity
 
@@ -25,6 +27,24 @@ LOOP_TTL = 3600  # seconds — loop counters expire after 1 hour of inactivity
 # Returns the new balance on success.
 # Raises a Redis error reply on NOT_FOUND or INSUFFICIENT funds.
 _DEDUCT_SCRIPT = """
+local current = tonumber(redis.call('GET', KEYS[1]))
+if not current then
+    return redis.error_reply('NOT_FOUND')
+end
+if current - tonumber(ARGV[1]) < 0 then
+    return redis.error_reply('INSUFFICIENT')
+end
+return redis.call('INCRBYFLOAT', KEYS[1], -tonumber(ARGV[1]))
+"""
+
+# ── Atomic init-if-new-then-deduct Lua script ─────────────────────────────────
+# Used for session ledgers: if the key doesn't exist yet, seed it with the
+# provided limit before attempting the deduction.
+_SESSION_DEDUCT_SCRIPT = """
+local limit = ARGV[2]
+if limit and limit ~= '' then
+    redis.call('SETNX', KEYS[1], limit)
+end
 local current = tonumber(redis.call('GET', KEYS[1]))
 if not current then
     return redis.error_reply('NOT_FOUND')
@@ -66,6 +86,18 @@ app.add_middleware(
 )
 
 
+# ── Auth dependency ───────────────────────────────────────────────────────────
+
+_api_key_header = APIKeyHeader(name="X-Winston-API-Key", auto_error=False)
+
+
+async def require_api_key(key: str = Depends(_api_key_header)):
+    if not WINSTON_MASTER_KEY:
+        raise HTTPException(status_code=500, detail="Server misconfiguration: WINSTON_MASTER_KEY not set.")
+    if key != WINSTON_MASTER_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing X-Winston-API-Key.")
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _redis(request: Request) -> aioredis.Redis:
@@ -103,6 +135,30 @@ async def _atomic_deduct(r: aioredis.Redis, project_id: str, amount: float) -> f
             raise HTTPException(
                 status_code=402,
                 detail={"status": "denied", "reason": "Budget Exceeded"},
+            )
+        raise HTTPException(status_code=500, detail=f"Redis script error: {exc}") from exc
+
+
+async def _atomic_deduct_session(
+    r: aioredis.Redis, session_id: str, amount: float, limit: str
+) -> float:
+    """
+    Atomically seed (if new) and deduct `amount` from a session ledger.
+    `limit` is the raw header string — passed to Lua to seed SETNX.
+    Raises 402 if session balance would go negative.
+    Returns the new session balance.
+    """
+    try:
+        new_balance = await r.eval(
+            _SESSION_DEDUCT_SCRIPT, 1, f"session:{session_id}", str(amount), limit
+        )
+        return float(new_balance)
+    except ResponseError as exc:
+        msg = str(exc)
+        if "INSUFFICIENT" in msg:
+            raise HTTPException(
+                status_code=402,
+                detail={"status": "denied", "reason": "Session Limit Exceeded"},
             )
         raise HTTPException(status_code=500, detail=f"Redis script error: {exc}") from exc
 
@@ -156,7 +212,7 @@ async def health(request: Request):
     return {"status": "ok", "redis": redis_status}
 
 
-@app.get("/v1/admin/budgets")
+@app.get("/v1/admin/budgets", dependencies=[Depends(require_api_key)])
 async def admin_list_budgets(request: Request):
     r = _redis(request)
     try:
@@ -173,7 +229,7 @@ async def admin_list_budgets(request: Request):
     ]
 
 
-@app.post("/v1/admin/budgets")
+@app.post("/v1/admin/budgets", dependencies=[Depends(require_api_key)])
 async def admin_set_budget(req: AdminBudgetSetRequest, request: Request):
     r = _redis(request)
     try:
@@ -183,7 +239,7 @@ async def admin_set_budget(req: AdminBudgetSetRequest, request: Request):
     return {"project_id": req.project_id, "balance": req.amount}
 
 
-@app.post("/v1/budget/check")
+@app.post("/v1/budget/check", dependencies=[Depends(require_api_key)])
 async def budget_check(req: BudgetCheckRequest, request: Request):
     r = _redis(request)
     try:
@@ -195,13 +251,15 @@ async def budget_check(req: BudgetCheckRequest, request: Request):
     return {"status": "allowed", "remaining": new_balance}
 
 
-@app.post("/v1/chat/completions")
+@app.post("/v1/chat/completions", dependencies=[Depends(require_api_key)])
 async def chat_completions(request: Request):
     r = _redis(request)
     project_id = request.headers.get("X-Project-Id", "project_alpha")
+    session_id = request.headers.get("X-Winston-Session-ID")
+    session_limit = request.headers.get("X-Winston-Session-Limit", "")
 
     try:
-        # ── 1. Pre-flight budget check ─────────────────────────────────────────
+        # ── 1. Pre-flight project budget check ────────────────────────────────
         balance = await _get_budget(r, project_id)
         if balance <= 0:
             raise HTTPException(
@@ -209,10 +267,23 @@ async def chat_completions(request: Request):
                 detail={"status": "denied", "reason": "Budget Exceeded"},
             )
 
+        # ── 2. Pre-flight session budget check (if session provided) ──────────
+        if session_id:
+            session_key = f"session:{session_id}"
+            # If a limit header was supplied and the key is new, seed it.
+            if session_limit:
+                await r.setnx(session_key, session_limit)
+            session_balance = await r.get(session_key)
+            if session_balance is not None and float(session_balance) <= 0:
+                raise HTTPException(
+                    status_code=402,
+                    detail={"status": "denied", "reason": "Session Limit Exceeded"},
+                )
+
         body: dict = await request.json()
         messages: list[dict] = body.get("messages", [])
 
-        # ── 2. Semantic loop detection ─────────────────────────────────────────
+        # ── 3. Semantic loop detection ─────────────────────────────────────────
         if await _check_loop(r, project_id, messages):
             raise HTTPException(
                 status_code=429,
@@ -224,7 +295,7 @@ async def chat_completions(request: Request):
     except RedisError as exc:
         raise HTTPException(status_code=500, detail=f"State store unavailable: {exc}") from exc
 
-    # ── 3. Dynamic model routing ───────────────────────────────────────────────
+    # ── 4. Dynamic model routing ───────────────────────────────────────────────
     _COMPLEX_TRIGGERS = {"code", "script", "function", "system"}
 
     last_user_text = next(
@@ -246,20 +317,28 @@ async def chat_completions(request: Request):
             flush=True,
         )
 
-    # ── 4. Route via LiteLLM ───────────────────────────────────────────────────
+    # ── 5. Route via LiteLLM ───────────────────────────────────────────────────
     try:
         response = litellm.completion(**body)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Upstream LLM error: {exc}") from exc
 
-    # ── 4. Deduct actual cost — best-effort, won't block the response ──────────
+    # ── 6. Deduct actual cost from project AND session ledgers ─────────────────
+    # Best-effort: won't block the response on Redis failure.
     try:
         cost = litellm.completion_cost(completion_response=response)
-        # INCRBYFLOAT with a negative value is atomic; floor at 0 prevents
-        # runaway negative balances from concurrent near-zero requests.
-        new_balance = float(await r.incrbyfloat(f"budget:{project_id}", -cost))
-        if new_balance < 0:
+
+        # Deduct from project — floor at 0 to prevent negative balances.
+        new_project_balance = float(await r.incrbyfloat(f"budget:{project_id}", -cost))
+        if new_project_balance < 0:
             await r.set(f"budget:{project_id}", "0.00")
+
+        # Deduct from session ledger if one was provided.
+        if session_id:
+            new_session_balance = float(await r.incrbyfloat(f"session:{session_id}", -cost))
+            if new_session_balance < 0:
+                await r.set(f"session:{session_id}", "0.00")
+
     except (RedisError, Exception):
         pass  # Log and alert here in production; don't block the response.
 
