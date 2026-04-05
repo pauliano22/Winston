@@ -4,6 +4,7 @@ import { useAuth } from "@clerk/nextjs";
 import { useEffect, useState, useCallback } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://3.144.134.48:8000";
+const API_KEY = process.env.NEXT_PUBLIC_WINSTON_API_KEY || "change-me-before-production";
 
 type Project = {
   project_id: string;
@@ -51,7 +52,9 @@ export default function Home() {
     setLoading(true);
     setFetchError(null);
     try {
-      const res = await fetch(`${API}/v1/admin/budgets`);
+      const res = await fetch(`${API}/v1/admin/budgets`, {
+        headers: { "X-Winston-API-Key": API_KEY },
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: Project[] = await res.json();
       setProjects(data.sort((a, b) => a.project_id.localeCompare(b.project_id)));
@@ -80,7 +83,7 @@ export default function Home() {
     try {
       const res = await fetch(`${API}/v1/admin/budgets`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Winston-API-Key": API_KEY },
         body: JSON.stringify({ project_id: projectId.trim(), amount: parsed }),
       });
       if (!res.ok) {
