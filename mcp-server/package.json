@@ -1,0 +1,19 @@
+{
+  "name": "winston-mcp-server",
+  "version": "0.1.0",
+  "description": "Winston MCP Server — exposes budget-control tools to AI agents",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "@types/node": "^20.12.0"
+  }
+}
