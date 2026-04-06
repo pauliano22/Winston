@@ -20,7 +20,7 @@ litellm.drop_params = True
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 WINSTON_MASTER_KEY = os.environ.get("WINSTON_MASTER_KEY", "")
 LOOP_TRIP_THRESHOLD = 3
-LOOP_TTL = 3600  # seconds — loop counters expire after 1 hour of inactivity
+LOOP_WINDOW_TTL = 60  # seconds — loop_count key expires after 60 s of inactivity
 
 # ── Atomic check-and-deduct Lua script ────────────────────────────────────────
 # Runs entirely inside Redis, so concurrent requests can't race each other.
@@ -165,8 +165,13 @@ async def _atomic_deduct_session(
 
 async def _check_loop(r: aioredis.Redis, project_id: str, messages: list[dict]) -> bool:
     """
-    Increment the per-(project, hash) counter in Redis with a 1-hour TTL.
-    Returns True if the circuit breaker threshold has been reached.
+    Sliding-window loop detection using a Redis LIST of recent prompt hashes.
+
+    - Stores the last 3 hashes in loop_check:{project_id}.
+    - If the incoming hash matches the previous 2 consecutive hashes, the prompt
+      is repeating; increments loop_count:{project_id} (60 s TTL on first hit).
+    - Returns True when loop_count reaches LOOP_TRIP_THRESHOLD (3).
+    - Resets loop_count to 0 on any unique prompt.
     """
     last_user_content = next(
         (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
@@ -175,11 +180,28 @@ async def _check_loop(r: aioredis.Redis, project_id: str, messages: list[dict]) 
     if not last_user_content:
         return False
 
-    key = f"loop:{project_id}:{_hash_message(last_user_content)}"
-    count = await r.incr(key)
-    if count == 1:
-        # Set TTL only on first creation to avoid resetting it on every call.
-        await r.expire(key, LOOP_TTL)
+    prompt_hash = _hash_message(last_user_content)
+    list_key = f"loop_check:{project_id}"
+    count_key = f"loop_count:{project_id}"
+
+    # Retrieve the two most-recent hashes stored for this project.
+    recent = await r.lrange(list_key, -2, -1)
+
+    if len(recent) == 2 and recent[0] == prompt_hash and recent[1] == prompt_hash:
+        # Incoming hash matches both prior entries — repeated prompt.
+        count = await r.incr(count_key)
+        if count == 1:
+            # Anchor the 60-second window on first detection.
+            await r.expire(count_key, LOOP_WINDOW_TTL)
+    else:
+        # Unique prompt — reset the counter.
+        await r.set(count_key, 0)
+        count = 0
+
+    # Maintain a rolling window of the last 3 hashes.
+    await r.rpush(list_key, prompt_hash)
+    await r.ltrim(list_key, -3, -1)
+
     return count >= LOOP_TRIP_THRESHOLD
 
 
@@ -214,9 +236,13 @@ async def health(request: Request):
 
 @app.get("/v1/admin/budgets", dependencies=[Depends(require_api_key)])
 async def admin_list_budgets(request: Request):
+    clerk_user_id = request.headers.get("X-Clerk-User-Id")
+    if not clerk_user_id:
+        raise HTTPException(status_code=400, detail="X-Clerk-User-Id header is required.")
     r = _redis(request)
     try:
-        keys = await r.keys("budget:*")
+        prefix = f"user:{clerk_user_id}:project:"
+        keys = await r.keys(f"{prefix}*")
         if not keys:
             return []
         values = await r.mget(*keys)
@@ -224,16 +250,19 @@ async def admin_list_budgets(request: Request):
         raise HTTPException(status_code=500, detail=f"State store unavailable: {exc}") from exc
 
     return [
-        {"project_id": key.removeprefix("budget:"), "balance": float(val or 0)}
+        {"project_id": key.removeprefix(prefix), "balance": float(val or 0)}
         for key, val in zip(keys, values)
     ]
 
 
 @app.post("/v1/admin/budgets", dependencies=[Depends(require_api_key)])
 async def admin_set_budget(req: AdminBudgetSetRequest, request: Request):
+    clerk_user_id = request.headers.get("X-Clerk-User-Id")
+    if not clerk_user_id:
+        raise HTTPException(status_code=400, detail="X-Clerk-User-Id header is required.")
     r = _redis(request)
     try:
-        await r.set(f"budget:{req.project_id}", str(req.amount))
+        await r.set(f"user:{clerk_user_id}:project:{req.project_id}", str(req.amount))
     except RedisError as exc:
         raise HTTPException(status_code=500, detail=f"State store unavailable: {exc}") from exc
     return {"project_id": req.project_id, "balance": req.amount}
@@ -287,7 +316,7 @@ async def chat_completions(request: Request):
         if await _check_loop(r, project_id, messages):
             raise HTTPException(
                 status_code=429,
-                detail={"error": "Semantic Loop Detected. Circuit Breaker Tripped to save budget."},
+                detail={"error": "Winston has detected a potential infinite loop. Request blocked to save your budget."},
             )
 
     except HTTPException:
@@ -297,20 +326,25 @@ async def chat_completions(request: Request):
 
     # ── 4. Dynamic model routing ───────────────────────────────────────────────
     _COMPLEX_TRIGGERS = {"code", "script", "function", "system"}
+    _LOW_COMPLEXITY_KEYWORDS = {"hello", "hi", "hey", "what time", "summarize this short text", "thanks", "thank you", "bye", "yes", "no"}
 
     last_user_text = next(
         (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
         "",
     )
+    lower_text = last_user_text.lower()
     word_count = len(last_user_text.split())
-    is_simple = (
+    is_low_complexity_keyword = any(kw in lower_text for kw in _LOW_COMPLEXITY_KEYWORDS)
+    is_simple = is_low_complexity_keyword or (
         word_count < 40
-        and not any(trigger in last_user_text.lower() for trigger in _COMPLEX_TRIGGERS)
+        and not any(trigger in lower_text for trigger in _COMPLEX_TRIGGERS)
     )
 
+    optimized = False
     if is_simple:
         original_model = body.get("model", "unknown")
         body["model"] = "claude-3-haiku-20240307"
+        optimized = True
         print(
             f"🚦 DYNAMIC ROUTING: Diverting simple request from "
             f"{original_model} to claude-3-haiku-20240307 to save budget.",
@@ -342,4 +376,5 @@ async def chat_completions(request: Request):
     except (RedisError, Exception):
         pass  # Log and alert here in production; don't block the response.
 
-    return JSONResponse(content=response.model_dump())
+    headers = {"X-Winston-Optimized": "true" if optimized else "false"}
+    return JSONResponse(content=response.model_dump(), headers=headers)

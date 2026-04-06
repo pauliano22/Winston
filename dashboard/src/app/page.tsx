@@ -50,11 +50,12 @@ export default function Home() {
   } | null>(null);
 
   const fetchBudgets = useCallback(async () => {
+    if (!userId) return;
     setLoading(true);
     setFetchError(null);
     try {
       const res = await fetch(`${API}/v1/admin/budgets`, {
-        headers: { "X-Winston-API-Key": API_KEY },
+        headers: { "X-Winston-API-Key": API_KEY, "X-Clerk-User-Id": userId },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: Project[] = await res.json();
@@ -66,7 +67,7 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     fetchBudgets();
@@ -84,7 +85,7 @@ export default function Home() {
     try {
       const res = await fetch(`${API}/v1/admin/budgets`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Winston-API-Key": API_KEY },
+        headers: { "Content-Type": "application/json", "X-Winston-API-Key": API_KEY, "X-Clerk-User-Id": userId ?? "" },
         body: JSON.stringify({ project_id: projectId.trim(), amount: parsed }),
       });
       if (!res.ok) {
