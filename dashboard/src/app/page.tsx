@@ -3,8 +3,8 @@
 import { useAuth } from "@clerk/nextjs";
 import { useEffect, useState, useCallback } from "react";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://3.144.134.48:8000";
-const API_KEY = process.env.NEXT_PUBLIC_WINSTON_API_KEY || "change-me-before-production";
+const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_KEY = process.env.NEXT_PUBLIC_WINSTON_API_KEY || "";
 
 type Project = {
   project_id: string;
@@ -35,7 +35,6 @@ function StatusBadge({ balance }: { balance: number }) {
 }
 
 export default function Home() {
-  console.log("Using API Key:", process.env.NEXT_PUBLIC_WINSTON_API_KEY);
   const { isLoaded, userId } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
