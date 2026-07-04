@@ -43,15 +43,22 @@ Winston is a B2B AI infrastructure product that acts as a **Circuit Breaker** fo
 |-----------|-------|---------|
 | `proxy/` | Python · FastAPI · LiteLLM | High-concurrency reverse proxy with budget enforcement |
 | `mcp-server/` | TypeScript · @modelcontextprotocol/sdk | MCP server exposing budget/control tools to agents |
+| `dashboard/` | TypeScript · Next.js · Clerk | Admin UI for viewing and managing project budgets |
+
+The proxy also depends on Redis for budget/loop-detection state (see `docker-compose.yml`).
 
 ## Quick Start
 
 ### Proxy
 
+Requires a running Redis instance and a `WINSTON_MASTER_KEY` for authenticated endpoints:
+
 ```bash
 cd proxy
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+docker run -d -p 6379:6379 redis:alpine
+export WINSTON_MASTER_KEY=change-me
 uvicorn main:app --reload --port 8000
 ```
 
