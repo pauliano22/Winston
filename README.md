@@ -64,12 +64,31 @@ uvicorn main:app --reload --port 8000
 
 ### MCP Server
 
+Requires the proxy above to be running, and a matching API key so the
+`check_budget` tool can authenticate:
+
 ```bash
 cd mcp-server
 npm install
 npm run build
+export WINSTON_API_KEY=change-me      # must match the proxy's WINSTON_MASTER_KEY
+export WINSTON_PROXY_URL=http://127.0.0.1:8000   # optional, this is the default
 npm start
 ```
+
+### Docker Compose (all services)
+
+```bash
+export WINSTON_MASTER_KEY=change-me
+export ANTHROPIC_API_KEY=...
+export NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=...
+export CLERK_SECRET_KEY=...
+docker compose up --build
+```
+
+Note that `NEXT_PUBLIC_*` values are baked into the dashboard's client
+bundle at *build* time, so changing them requires `--build` again, not
+just a restart.
 
 ## How It Works
 
