@@ -2,7 +2,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-const PROXY_URL = "http://127.0.0.1:8000";
+const PROXY_URL = process.env.WINSTON_PROXY_URL ?? "http://127.0.0.1:8000";
+const WINSTON_API_KEY = process.env.WINSTON_API_KEY ?? "";
 
 const server = new McpServer({
   name: "winston-mcp-server",
@@ -21,7 +22,10 @@ server.tool(
     try {
       res = await fetch(`${PROXY_URL}/v1/budget/check`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Winston-API-Key": WINSTON_API_KEY,
+        },
         body: JSON.stringify({ project_id, cost_estimate }),
       });
     } catch (err) {
