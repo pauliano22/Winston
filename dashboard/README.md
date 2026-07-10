@@ -1,6 +1,12 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+Winston's operator dashboard — a Next.js app for managing per-project budgets against the [Winston proxy](../README.md), authenticated with [Clerk](https://clerk.com).
 
 ## Getting Started
+
+Requires the Winston proxy running locally (see the [root README](../README.md#quick-start)) and the following environment variables:
+
+- `NEXT_PUBLIC_API_URL` — base URL of the Winston proxy
+- `NEXT_PUBLIC_WINSTON_API_KEY` — proxy admin API key
+- Clerk auth keys (`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`)
 
 First, run the development server:
 

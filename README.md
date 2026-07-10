@@ -76,4 +76,4 @@ npm start
 1. An agent is configured to route all LLM calls through the Winston Proxy instead of calling the provider directly.
 2. The proxy checks the agent's remaining budget on every request. If the budget is exhausted, the request is rejected with a structured error.
 3. Optionally, the agent can call the `check_budget` MCP tool before starting an expensive task to get a real-time budget snapshot.
-4. Operators manage budgets, view spend analytics, and configure circuit-breaker thresholds through the Winston API.
+4. Operators set and view per-project budgets through the Winston admin API (`/v1/admin/budgets`).
