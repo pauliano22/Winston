@@ -71,6 +71,16 @@ npm run build
 npm start
 ```
 
+### Dashboard
+
+Requires the proxy running (see above) and Clerk auth keys — see `dashboard/README.md` for required environment variables:
+
+```bash
+cd dashboard
+npm install
+npm run dev
+```
+
 ## How It Works
 
 1. An agent is configured to route all LLM calls through the Winston Proxy instead of calling the provider directly.
