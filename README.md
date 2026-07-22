@@ -64,10 +64,13 @@ uvicorn main:app --reload --port 8000
 
 ### MCP Server
 
+Requires `WINSTON_API_KEY` set to the same value as the proxy's `WINSTON_MASTER_KEY`, since `/v1/budget/check` is an authenticated endpoint:
+
 ```bash
 cd mcp-server
 npm install
 npm run build
+export WINSTON_API_KEY=change-me
 npm start
 ```
 
