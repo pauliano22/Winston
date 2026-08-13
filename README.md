@@ -31,8 +31,8 @@ Winston is a B2B AI infrastructure product that acts as a **Circuit Breaker** fo
 │                                                                   │
 │  • Implements the Model Context Protocol (MCP)                   │
 │  • Exposes tools that agents can call directly                   │
-│  • check_budget — lets an agent query its remaining budget       │
-│    before issuing expensive operations                           │
+│  • check_budget — reserves the estimated cost of an operation    │
+│    against the project's budget before it runs                   │
 │  • Future tools: pause_agent, report_loop, adjust_limit, …      │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -51,7 +51,7 @@ The proxy also depends on Redis for budget/loop-detection state (see `docker-com
 
 ### Proxy
 
-Requires a running Redis instance and a `WINSTON_MASTER_KEY` for authenticated endpoints:
+Requires a running Redis instance, a `WINSTON_MASTER_KEY` for authenticated endpoints, and an upstream provider key (e.g. `ANTHROPIC_API_KEY`) so LiteLLM can reach the real LLM provider:
 
 ```bash
 cd proxy
@@ -59,6 +59,7 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 docker run -d -p 6379:6379 redis:alpine
 export WINSTON_MASTER_KEY=change-me
+export ANTHROPIC_API_KEY=sk-ant-...
 uvicorn main:app --reload --port 8000
 ```
 
@@ -85,5 +86,5 @@ npm run dev
 
 1. An agent is configured to route all LLM calls through the Winston Proxy instead of calling the provider directly.
 2. The proxy checks the agent's remaining budget on every request. If the budget is exhausted, the request is rejected with a structured error.
-3. Optionally, the agent can call the `check_budget` MCP tool before starting an expensive task to get a real-time budget snapshot.
+3. Optionally, the agent can call the `check_budget` MCP tool before starting an expensive task; this deducts the estimated cost from the project's budget up front rather than just reporting the balance.
 4. Operators set and view per-project budgets through the Winston admin API (`/v1/admin/budgets`).
