@@ -19,6 +19,9 @@ litellm.drop_params = True
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 WINSTON_MASTER_KEY = os.environ.get("WINSTON_MASTER_KEY", "")
+# claude-3-haiku-20240307 was retired by Anthropic on 2026-04-20; every request
+# routed to it now fails upstream. Override via env if the successor is renamed again.
+ROUTING_MODEL_ID = os.environ.get("ROUTING_MODEL_ID", "claude-haiku-4-5-20251001")
 LOOP_TRIP_THRESHOLD = 3
 LOOP_WINDOW_TTL = 60  # seconds — loop_count key expires after 60 s of inactivity
 
@@ -343,11 +346,11 @@ async def chat_completions(request: Request):
     optimized = False
     if is_simple:
         original_model = body.get("model", "unknown")
-        body["model"] = "claude-3-haiku-20240307"
+        body["model"] = ROUTING_MODEL_ID
         optimized = True
         print(
             f"🚦 DYNAMIC ROUTING: Diverting simple request from "
-            f"{original_model} to claude-3-haiku-20240307 to save budget.",
+            f"{original_model} to {ROUTING_MODEL_ID} to save budget.",
             flush=True,
         )
 
