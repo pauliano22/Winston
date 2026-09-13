@@ -241,7 +241,7 @@ async def admin_list_budgets(request: Request):
         raise HTTPException(status_code=400, detail="X-Clerk-User-Id header is required.")
     r = _redis(request)
     try:
-        prefix = f"user:{clerk_user_id}:project:"
+        prefix = "budget:"
         keys = await r.keys(f"{prefix}*")
         if not keys:
             return []
@@ -262,7 +262,7 @@ async def admin_set_budget(req: AdminBudgetSetRequest, request: Request):
         raise HTTPException(status_code=400, detail="X-Clerk-User-Id header is required.")
     r = _redis(request)
     try:
-        await r.set(f"user:{clerk_user_id}:project:{req.project_id}", str(req.amount))
+        await r.set(f"budget:{req.project_id}", str(req.amount))
     except RedisError as exc:
         raise HTTPException(status_code=500, detail=f"State store unavailable: {exc}") from exc
     return {"project_id": req.project_id, "balance": req.amount}
