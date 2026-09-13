@@ -236,22 +236,28 @@ async def health(request: Request):
 
 @app.get("/v1/admin/budgets", dependencies=[Depends(require_api_key)])
 async def admin_list_budgets(request: Request):
+    """List the budgets for every project this Clerk user has created.
+
+    Balances live under the same `budget:{project_id}` key that
+    `/v1/chat/completions` and `/v1/budget/check` read and deduct from —
+    the `user:{clerk_user_id}:projects` set is only an index of which
+    project_ids belong to this user, not a separate copy of the balance.
+    """
     clerk_user_id = request.headers.get("X-Clerk-User-Id")
     if not clerk_user_id:
         raise HTTPException(status_code=400, detail="X-Clerk-User-Id header is required.")
     r = _redis(request)
     try:
-        prefix = f"user:{clerk_user_id}:project:"
-        keys = await r.keys(f"{prefix}*")
-        if not keys:
+        project_ids = await r.smembers(f"user:{clerk_user_id}:projects")
+        if not project_ids:
             return []
-        values = await r.mget(*keys)
+        balances = await r.mget(*(f"budget:{pid}" for pid in project_ids))
     except RedisError as exc:
         raise HTTPException(status_code=500, detail=f"State store unavailable: {exc}") from exc
 
     return [
-        {"project_id": key.removeprefix(prefix), "balance": float(val or 0)}
-        for key, val in zip(keys, values)
+        {"project_id": pid, "balance": float(bal or 0)}
+        for pid, bal in zip(project_ids, balances)
     ]
 
 
@@ -262,7 +268,8 @@ async def admin_set_budget(req: AdminBudgetSetRequest, request: Request):
         raise HTTPException(status_code=400, detail="X-Clerk-User-Id header is required.")
     r = _redis(request)
     try:
-        await r.set(f"user:{clerk_user_id}:project:{req.project_id}", str(req.amount))
+        await r.sadd(f"user:{clerk_user_id}:projects", req.project_id)
+        await r.set(f"budget:{req.project_id}", str(req.amount))
     except RedisError as exc:
         raise HTTPException(status_code=500, detail=f"State store unavailable: {exc}") from exc
     return {"project_id": req.project_id, "balance": req.amount}
