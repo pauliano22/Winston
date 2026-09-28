@@ -19,6 +19,7 @@ litellm.drop_params = True
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 WINSTON_MASTER_KEY = os.environ.get("WINSTON_MASTER_KEY", "")
+CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(",")
 LOOP_TRIP_THRESHOLD = 3
 LOOP_WINDOW_TTL = 60  # seconds — loop_count key expires after 60 s of inactivity
 
@@ -80,7 +81,7 @@ app = FastAPI(title="Winston Proxy", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://3.144.134.48:3000", "http://3.144.134.48"],
+    allow_origins=CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
