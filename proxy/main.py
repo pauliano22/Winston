@@ -1,5 +1,6 @@
 import hashlib
 import os
+import re
 from contextlib import asynccontextmanager
 
 import litellm
@@ -334,7 +335,9 @@ async def chat_completions(request: Request):
     )
     lower_text = last_user_text.lower()
     word_count = len(last_user_text.split())
-    is_low_complexity_keyword = any(kw in lower_text for kw in _LOW_COMPLEXITY_KEYWORDS)
+    is_low_complexity_keyword = any(
+        re.search(rf"\b{re.escape(kw)}\b", lower_text) for kw in _LOW_COMPLEXITY_KEYWORDS
+    )
     is_simple = is_low_complexity_keyword or (
         word_count < 40
         and not any(trigger in lower_text for trigger in _COMPLEX_TRIGGERS)
