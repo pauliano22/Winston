@@ -4,7 +4,9 @@ import { useAuth } from "@clerk/nextjs";
 import { useEffect, useState, useCallback } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://3.144.134.48:8000";
-const API_KEY = process.env.NEXT_PUBLIC_WINSTON_API_KEY || "change-me-before-production";
+// No hardcoded fallback: this is bundled into the public client JS, so a
+// guessable default admin key here would effectively ship a real credential.
+const API_KEY = process.env.NEXT_PUBLIC_WINSTON_API_KEY ?? "";
 
 type Project = {
   project_id: string;
@@ -110,6 +112,14 @@ export default function Home() {
   }
 
   if (!isLoaded) return null;
+
+  if (!API_KEY) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-zinc-950 text-red-400 text-sm">
+        Dashboard misconfigured: NEXT_PUBLIC_WINSTON_API_KEY is not set.
+      </div>
+    );
+  }
 
   if (!userId) {
     return (
