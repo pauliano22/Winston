@@ -69,6 +69,9 @@ export default function Home() {
   }, [userId]);
 
   useEffect(() => {
+    // fetchBudgets is an async data fetch (not a synchronous setState call);
+    // its state updates land after the awaited network request resolves.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchBudgets();
   }, [fetchBudgets]);
 
