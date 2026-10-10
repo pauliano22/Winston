@@ -69,6 +69,7 @@ export default function Home() {
   }, [userId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- data fetch on mount, not a render-loop setState
     fetchBudgets();
   }, [fetchBudgets]);
 
