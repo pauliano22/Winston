@@ -69,6 +69,9 @@ export default function Home() {
   }, [userId]);
 
   useEffect(() => {
+    // Intentional fetch-on-mount/on-userId-change; the setState calls inside
+    // fetchBudgets happen before its internal fetch() resolves.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchBudgets();
   }, [fetchBudgets]);
 
