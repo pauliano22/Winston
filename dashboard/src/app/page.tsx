@@ -69,6 +69,10 @@ export default function Home() {
   }, [userId]);
 
   useEffect(() => {
+    // fetchBudgets sets loading/error state before its first await (the
+    // standard fetch-on-mount pattern); newer eslint-plugin-react-hooks
+    // flags that as a potential cascading render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchBudgets();
   }, [fetchBudgets]);
 
