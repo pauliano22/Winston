@@ -69,6 +69,7 @@ export default function Home() {
   }, [userId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount; fetchBudgets is async and sets state in its own callback, not synchronously during render
     fetchBudgets();
   }, [fetchBudgets]);
 
